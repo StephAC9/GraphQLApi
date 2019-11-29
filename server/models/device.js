@@ -6,5 +6,5 @@ const deviceSchema = new Schema({
     status: String,
     roomId: String
 });
-
-module.exports = mongoose.model('Device', deviceSchema);
+//module.exports = deviceSchema
+module.exports = mongoose.model('Devices', deviceSchema);

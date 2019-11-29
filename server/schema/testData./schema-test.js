@@ -144,7 +144,7 @@ const HouseType = new GraphQLObjectType({
         rooms: {
             type: new GraphQLList(RoomType),
             resolve(parent, args) {
-                //return _.filter(houses, { ownerId: parent.id });
+                //return _.filter(houses, { ownerId: parent.id });  // using lodash
                 return rooms.filter(room => room.houseId === parent.id)
             }
         }

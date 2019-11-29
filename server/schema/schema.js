@@ -1,8 +1,12 @@
+require('dotenv').config()
 const graphql = require('graphql')
 const Owner = require('../models/owner');
 const House = require('../models/house');
 const Room = require('../models/room');
 const Device = require('../models/device');
+const AuthData = require('../models/authData')
+const bcrypt = require('bcryptjs');
+const jwt = require('jsonwebtoken');
 
 const {
     GraphQLObjectType,
@@ -21,12 +25,21 @@ const OwnerType = new GraphQLObjectType({
         id: { type: GraphQLID },
         name: { type: GraphQLString },
         age: { type: GraphQLInt },
+        email: { type: GraphQLString },
+        password: { type: GraphQLString },
+        phoneNumber: { type: GraphQLString },
         houses: {
             type: new GraphQLList(HouseType),
-            resolve(parent, args) {
-                return House.find({ ownerId: parent.id })
-            }
+            resolve: async(parent, args) => House.find({ ownerId: parent.id })
         }
+    })
+});
+const AuthType = new GraphQLObjectType({
+    name: 'AuthData',
+    fields: () => ({
+        ownerId: { type: GraphQLID },
+        token: { type: GraphQLString },
+        tokenExpiration: { type: GraphQLInt }
     })
 });
 const HouseType = new GraphQLObjectType({
@@ -36,15 +49,11 @@ const HouseType = new GraphQLObjectType({
         address: { type: GraphQLString },
         owner: {
             type: OwnerType,
-            resolve(parent, args) {
-                return Owner.findById(parent.ownerId)
-            }
+            resolve: async(parent, args) => Owner.findById(parent.ownerId)
         },
         rooms: {
             type: new GraphQLList(RoomType),
-            resolve(parent, args) {
-                return Room.find({ houseId: parent.id })
-            }
+            resolve: async(parent, args) => Room.find({ houseId: parent.id })
         }
     })
 });
@@ -57,15 +66,11 @@ const RoomType = new GraphQLObjectType({
         descriptor: { type: GraphQLString },
         house: {
             type: HouseType, // List because an owner can own multiple houses
-            resolve(parent, args) {
-                return House.findById(parent.houseId)
-            }
+            resolve: async(parent, args) => House.findById(parent.houseId)
         },
         devices: {
             type: new GraphQLList(DeviceType),
-            resolve(parent, args) {
-                return Device.find({ roomId: parent.id })
-            }
+            resolve: async(parent, args) => Device.find({ roomId: parent.id })
         }
     })
 });
@@ -78,9 +83,7 @@ const DeviceType = new GraphQLObjectType({
         status: { type: GraphQLString },
         room: {
             type: RoomType,
-            resolve(parent, args) {
-                return Room.findById(parent.roomId)
-            }
+            resolve: async(parent, args) => Room.findById(parent.roomId)
         }
     })
 });
@@ -91,46 +94,86 @@ const DeviceType = new GraphQLObjectType({
 const RootQuery = new GraphQLObjectType({
     name: 'RootQueryType',
     fields: {
+
+        login: {
+            type: AuthType,
+            //type: dataType.authType,
+            args: {
+                email: { type: new GraphQLNonNull(GraphQLString) },
+                password: { type: new GraphQLNonNull(GraphQLString) }
+            },
+            resolve: async(parent, args) => {
+                const user = await Owner.findOne({ email: args.email });
+                if (!user) {
+                    throw new Error('User does not exist!');
+                }
+                const isEqual = await bcrypt.compare(args.password, user.password);
+                if (!isEqual) {
+                    throw new Error('Password is incorrect!');
+                }
+                const token = jwt.sign({ id: user.id, email: user.email },
+                    process.env.ACCESS_TOKEN_SECRETKEY, {
+                        expiresIn: '2h'
+                    }
+                );
+                return {
+                    ownerId: user.id,
+                    token: token,
+                    tokenExpiration: 2
+                };
+            }
+        },
         owner: {
             type: OwnerType,
+            //type: dataType.ownerType,
             args: { id: { type: GraphQLID } },
-            resolve(parent, args) {
-                return Owner.findById(args.id)
+            resolve: async(parent, args) => {
+                let owner = await Owner.findById(args.id)
+                if (!owner) {
+                    throw new Error('No found!')
+                }
+                owner.password = null
+
+                return owner
             }
         },
         house: {
             type: HouseType,
+            //type: dataType.houseType,
             args: { id: { type: GraphQLID } },
-            resolve(parent, args) {
-                return House.findById(args.id)
-            }
+            resolve: async(parent, args) => await House.findById(args.id)
         },
         room: {
             type: RoomType,
+            //type: dataType.roomType,
             args: { id: { type: GraphQLID } },
-            resolve(parent, args) {
-                return Room.findById(args.id)
-            }
+            resolve: async(parent, args) => await Room.findById(args.id)
         },
         device: {
             type: DeviceType,
+            //type: dataType.deviceType,
             args: { id: { type: GraphQLID } },
-            resolve(parent, args) {
-                return Device.findById(args.id)
-            }
+            resolve: async(parent, args) => await Device.findById(args.id)
         },
-
-
         houses: {
             type: new GraphQLList(HouseType),
-            resolve(parent, args) {
-                return House.find({})
+            //type: new GraphQLList(dataType.houseType),
+            resolve: async(parent, args) => {
+                //let houses = await House.find({});
+                /*  houses.forEach(house => {
+                     let owner = house.owner
+                     owner.password = null
+                 }) */
+                return await House.find({})
             }
         },
         owners: {
             type: new GraphQLList(OwnerType),
-            resolve(parent, args) {
-                return Owner.find({})
+            //type: new GraphQLList(dataType.ownerType),
+            resolve: async(parent, args) => {
+                let owners = await Owner.find({})
+                owners.forEach(owner => owner.password = null) //Return password = null to frontend if requested.
+                return owners
             }
         }
     }
@@ -139,50 +182,85 @@ const RootQuery = new GraphQLObjectType({
 const Mutation = new GraphQLObjectType({
     name: 'Mutation',
     fields: {
-        addOwner: {
+        createAccount: {
             type: OwnerType,
+            //type: dataType.ownerType,
             args: {
                 name: { type: new GraphQLNonNull(GraphQLString) },
-                age: { type: GraphQLInt }
+                age: { type: new GraphQLNonNull(GraphQLInt) },
+                email: { type: new GraphQLNonNull(GraphQLString) },
+                password: { type: new GraphQLNonNull(GraphQLString) },
+                phoneNumber: { type: GraphQLString },
             },
-            resolve(parent, args) {
-                let owner = new Owner({
+            resolve: async(parent, args) => {
+                const existingUser = await Owner.findOne({ email: args.email });
+                if (existingUser) {
+                    throw new Error('User exists already.');
+                }
+                const hashedPassword = await bcrypt.hash(args.password, 12);
+
+                const user = new Owner({
                     name: args.name,
-                    age: args.age
+                    age: args.age,
+                    email: args.email,
+                    password: hashedPassword,
+                    phoneNumber: args.phoneNumber
                 });
-                return owner.save();
+
+                const result = await user.save();
+
+                return {
+                    id: result.id,
+                    name: result.name,
+                    age: result.age,
+                    email: result.email,
+                    password: null,
+                    phoneNumber: result.phoneNumber
+                };
             }
         },
         addHouse: {
             type: HouseType,
+            //type: dataType.houseType,
             args: {
                 address: { type: new GraphQLNonNull(GraphQLString) },
-                ownerId: { type: new GraphQLNonNull(GraphQLID) }
+                //ownerId: { type: new GraphQLNonNull(GraphQLID) },
             },
-            resolve(parent, args) {
+            resolve: async(parent, args, req) => {
+                console.log(req)
+                if (!req.isAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                const houseExist = await House.findOne({ address: args.address })
+                console.log(houseExist)
+                if (houseExist) {
+                    throw new Error('This house have already been registered!')
+                }
                 let house = new House({
                     address: args.address,
-                    ownerId: args.ownerId
+                    ownerId: req.ownerId
                 });
                 return house.save();
             }
         },
         addRoom: {
             type: RoomType,
+            //type: dataType.roomType,
             args: {
                 descriptor: { type: new GraphQLNonNull(GraphQLString) },
-                houseId: { type: new GraphQLNonNull(GraphQLID) }
+                houseId: { type: new GraphQLNonNull(GraphQLID) },
             },
             resolve(parent, args) {
                 let room = new Room({
                     descriptor: args.descriptor,
-                    houseId: args.houseId
+                    houseId: args.houseId,
                 });
                 return room.save();
             }
         },
         addDevice: {
             type: DeviceType,
+            //type: dataType.deviceType,
             args: {
                 descriptor: { type: new GraphQLNonNull(GraphQLString) },
                 status: { type: new GraphQLNonNull(GraphQLString) },
@@ -196,7 +274,37 @@ const Mutation = new GraphQLObjectType({
                 });
                 return device.save();
             }
-        }
+        },
+        removeHouse: {
+            type: HouseType,
+            //type: dataType.houseType,
+            args: {
+                id: { type: new GraphQLNonNull(GraphQLID) },
+            },
+            resolve: async(parent, args) => {
+                let house = await House.findById(args.id)
+                return House.remove(house)
+            },
+            removeRooms: {
+                type: new GraphQLList(RoomType),
+                //type: new GraphQLList(dataType.roomType),
+                resolve: async(parent, args) => {
+                    let rooms = await Room.find({ houseId: parent.id })
+                    return Room.re
+                },
+
+                removeDevices: {
+                    type: new GraphQLList(DeviceType),
+                    //type: new GraphQLList(dataType.deviceType),
+                    resolve: async(parent, args) => {
+                        let devices = await Room.find({ roomId: parent.id })
+                        return Device.remove(device)
+                    },
+                }
+            }
+        },
+
+
     }
 });
 
