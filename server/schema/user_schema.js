@@ -19,6 +19,11 @@ const {
 } = graphql;
 
 
+
+
+//TYPES
+
+
 const OwnerType = new GraphQLObjectType({
     name: 'Owner',
     fields: () => ({
@@ -28,6 +33,7 @@ const OwnerType = new GraphQLObjectType({
         email: { type: GraphQLString },
         password: { type: GraphQLString },
         phoneNumber: { type: GraphQLString },
+        imageURL: { type: GraphQLString },
         houses: {
             type: new GraphQLList(HouseType),
             resolve: async(parent, args) => await House.find({ ownerId: parent.id })
@@ -68,6 +74,7 @@ const RoomType = new GraphQLObjectType({
     fields: () => ({
         id: { type: GraphQLID },
         descriptor: { type: GraphQLString },
+        imageURL: { type: GraphQLString },
         house: {
             type: HouseType, // List because an owner can own multiple houses
             resolve: async(parent, args) => await House.findById(parent.houseId)
@@ -85,12 +92,21 @@ const DeviceType = new GraphQLObjectType({
         id: { type: GraphQLID },
         descriptor: { type: GraphQLString },
         status: { type: GraphQLString },
+        imageURL: { type: GraphQLString },
         room: {
             type: RoomType,
             resolve: async(parent, args) => await Room.findById(parent.roomId)
         }
     })
 });
+
+
+
+
+
+//QUERIES
+
+
 
 
 
@@ -115,22 +131,25 @@ const RootQuery = new GraphQLObjectType({
                     throw new Error('Password is incorrect!');
                 }
                 const token = jwt.sign({ id: user.id, email: user.email },
-                    process.env.ACCESS_TOKEN_SECRETKEY, {
-                        expiresIn: '2h'
+                    process.env.USER_ACCESS_TOKEN_SECRETKEY, {
+                        expiresIn: process.env.USER_TOKEN_EXPIRATION_TIME + 'h'
                     }
                 );
                 return {
                     ownerId: user.id,
                     token: token,
-                    tokenExpiration: 2
+                    tokenExpiration: process.env.USER_TOKEN_EXPIRATION_TIME
                 };
             }
         },
+
         owner: {
             type: OwnerType,
-            args: { id: { type: GraphQLID } },
-            resolve: async(parent, args) => {
-                let owner = await Owner.findById(args.id)
+            resolve: async(parent, args, req) => {
+                if (!req.userIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                let owner = await Owner.findById(req.ownerId)
                 if (!owner) {
                     throw new Error('No found!')
                 }
@@ -138,36 +157,21 @@ const RootQuery = new GraphQLObjectType({
 
                 return owner
             }
-        },
-        house: {
-            type: HouseType,
-            args: { id: { type: GraphQLID } },
-            resolve: async(parent, args) => await House.findById(args.id)
-        },
-        room: {
-            type: RoomType,
-            args: { id: { type: GraphQLID } },
-            resolve: async(parent, args) => await Room.findById(args.id)
-        },
-        device: {
-            type: DeviceType,
-            args: { id: { type: GraphQLID } },
-            resolve: async(parent, args) => await Device.findById(args.id)
-        },
-        houses: {
-            type: new GraphQLList(HouseType),
-            resolve: async(parent, args) => await House.find({})
-        },
-        owners: {
-            type: new GraphQLList(OwnerType),
-            resolve: async(parent, args) => {
-                let owners = await Owner.find({})
-                owners.forEach(owner => owner.password = null) //Return password = null to frontend if requested.
-                return owners
-            }
         }
     }
 });
+
+
+
+
+
+//MUTATIONS
+
+
+
+
+
+
 
 const Mutation = new GraphQLObjectType({
     name: 'Mutation',
@@ -214,7 +218,7 @@ const Mutation = new GraphQLObjectType({
                 address: { type: new GraphQLNonNull(GraphQLString) },
             },
             resolve: async(parent, args, req) => {
-                if (!req.isAuth) {
+                if (!req.userIsAuth) {
                     throw new Error('Unauthenticated!');
                 }
                 const houseExist = await House.findOne({ address: args.address })
@@ -225,7 +229,7 @@ const Mutation = new GraphQLObjectType({
                     address: args.address,
                     ownerId: req.ownerId
                 });
-                return house.save();
+                return await house.save();
             }
         },
         addRoom: {
@@ -235,14 +239,14 @@ const Mutation = new GraphQLObjectType({
                 houseId: { type: new GraphQLNonNull(GraphQLID) },
             },
             resolve: async(parent, args, req) => {
-                if (!req.isAuth) {
+                if (!req.userIsAuth) {
                     throw new Error('Unauthenticated!');
                 }
                 let room = new Room({
                     descriptor: args.descriptor,
                     houseId: args.houseId,
                 });
-                return room.save();
+                return await room.save();
             }
         },
         addDevice: {
@@ -252,13 +256,33 @@ const Mutation = new GraphQLObjectType({
                 status: { type: new GraphQLNonNull(GraphQLString) },
                 roomId: { type: new GraphQLNonNull(GraphQLID) }
             },
-            resolve(parent, args) {
+            resolve: async(parent, args, req) => {
+                if (!req.userIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                let room = await Room.findById(args.roomId)
                 let device = new Device({
                     descriptor: args.descriptor,
                     status: args.status,
-                    roomId: args.roomId
+                    roomId: args.roomId,
+                    houseId: room.houseId
                 });
-                return device.save();
+                return await device.save();
+            }
+        },
+        updateDeviceStatus: {
+            type: DeviceType,
+            args: {
+                id: { type: new GraphQLNonNull(GraphQLID) },
+                status: { type: new GraphQLNonNull(GraphQLString) },
+            },
+            resolve: async(parent, args, req) => {
+                if (!req.userIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                let device = await Device.findById(args.id)
+                device.status = args.status
+                return device.save()
             }
         },
         removeHouse: {
@@ -266,27 +290,45 @@ const Mutation = new GraphQLObjectType({
             args: {
                 id: { type: new GraphQLNonNull(GraphQLID) },
             },
-            resolve: async(parent, args) => {
-                let house = await House.findById(args.id)
-                return House.remove(house)
-            },
-            removeRooms: {
-                type: new GraphQLList(RoomType),
-                resolve: async(parent, args) => {
-                    let rooms = await Room.find({ houseId: parent.id })
-                    return Room.re
-                },
-
-                removeDevices: {
-                    type: new GraphQLList(DeviceType),
-                    resolve: async(parent, args) => {
-                        let devices = await Room.find({ roomId: parent.id })
-                        return Device.remove(device)
-                    },
+            resolve: async(parent, args, req) => {
+                if (!req.userIsAuth) {
+                    throw new Error('Unauthenticated!');
                 }
+                await Device.deleteMany({ houseId: args.id }, err => {}) //Remove all corresponding devices
+                await Room.deleteMany({ houseId: args.id }, err => {}) // Remove all corresponding rooms
+                let house = await House.findById(args.id)
+                return await House.remove(house)
             }
         },
 
+        removeRoom: {
+            type: RoomType,
+            args: {
+                id: { type: new GraphQLNonNull(GraphQLID) }
+            },
+            resolve: async(parent, args, req) => {
+                if (!req.userIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                await Device.deleteMany({ houseId: args.houseId }, err => {}) //Remove all corresponding devices
+                let room = await Room.findById(args.id)
+                return await Room.remove(room)
+            }
+        },
+
+        removeDevice: {
+            type: DeviceType,
+            args: {
+                id: { type: new GraphQLNonNull(GraphQLID) }
+            },
+            resolve: async(parent, args, req) => {
+                if (!req.userIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                let device = await Device.findById(args.id)
+                return await Device.remove(device)
+            }
+        },
 
     }
 });

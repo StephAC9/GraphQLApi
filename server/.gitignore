@@ -1,0 +1,9 @@
+node_modules/
+testData/
+testData/schema_test.js
+schema/admin_schema.js
+assets/
+assets/imgs
+assets/image.js
+admin_auth.js
+.env

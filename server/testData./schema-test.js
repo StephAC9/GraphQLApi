@@ -238,6 +238,148 @@ const RootQuery = new GraphQLObjectType({
             resolve(parent, args) {
                 return owners;
             }
-        }
+        },
+
+
+
+        owner: {
+            type: OwnerType,
+            args: { id: { type: GraphQLID } },
+            resolve: async(parent, args) => {
+                let owner = await Owner.findById(args.id)
+                if (!owner) {
+                    throw new Error('No found!')
+                }
+                owner.password = null
+
+                return owner
+            }
+        },
+        house: {
+            type: HouseType,
+            args: { id: { type: GraphQLID } },
+            resolve: async(parent, args) => await House.findById(args.id)
+        },
+        room: {
+            type: RoomType,
+            args: { id: { type: GraphQLID } },
+            resolve: async(parent, args) => await Room.findById(args.id)
+        },
+        device: {
+            type: DeviceType,
+            args: { id: { type: GraphQLID } },
+            resolve: async(parent, args) => await Device.findById(args.id)
+        },
+        houses: {
+            type: new GraphQLList(HouseType),
+            resolve: async(parent, args) => await House.find({})
+        },
+        owners: {
+            type: new GraphQLList(OwnerType),
+            resolve: async(parent, args) => {
+                let owners = await Owner.find({})
+                owners.forEach(owner => owner.password = null) //Return password = null to frontend if requested.
+                return owners
+            }
+        },
+
+
+        addRoom: {
+            type: RoomType,
+            args: {
+                descriptor: { type: new GraphQLNonNull(GraphQLString) },
+                houseId: { type: new GraphQLNonNull(GraphQLID) },
+            },
+            resolve: async(parent, args, req) => {
+                if (!req.adminIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                let room = new Room({
+                    descriptor: args.descriptor,
+                    houseId: args.houseId,
+                });
+                return await room.save();
+            }
+        },
+        addDevice: {
+            type: DeviceType,
+            args: {
+                descriptor: { type: new GraphQLNonNull(GraphQLString) },
+                status: { type: new GraphQLNonNull(GraphQLString) },
+                roomId: { type: new GraphQLNonNull(GraphQLID) }
+            },
+            resolve: async(parent, args, req) => {
+                if (!req.adminIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                let room = await Room.findById(args.roomId)
+                let device = new Device({
+                    descriptor: args.descriptor,
+                    status: args.status,
+                    roomId: args.roomId,
+                    houseId: room.houseId
+                });
+                return await device.save();
+            }
+        },
+        updateDeviceStatus: {
+            type: DeviceType,
+            args: {
+                id: { type: new GraphQLNonNull(GraphQLID) },
+                status: { type: new GraphQLNonNull(GraphQLString) },
+            },
+            resolve: async(parent, args, req) => {
+                if (!req.adminIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                let device = await Device.findById(args.id)
+                device.status = args.status
+                return device.save()
+            }
+        },
+        removeHouse: {
+            type: HouseType,
+            args: {
+                id: { type: new GraphQLNonNull(GraphQLID) },
+            },
+            resolve: async(parent, args, req) => {
+                if (!req.adminIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                await Device.deleteMany({ houseId: args.id }, err => {}) //Remove all corresponding devices
+                await Room.deleteMany({ houseId: args.id }, err => {}) // Remove all corresponding rooms
+                let house = await House.findById(args.id)
+                return await House.remove(house)
+            }
+        },
+
+        removeRoom: {
+            type: RoomType,
+            args: {
+                id: { type: new GraphQLNonNull(GraphQLID) }
+            },
+            resolve: async(parent, args, req) => {
+                if (!req.adminIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                await Device.deleteMany({ houseId: args.houseId }, err => {}) //Remove all corresponding devices
+                let room = await Room.findById(args.id)
+                return await Room.remove(room)
+            }
+        },
+
+        removeDevice: {
+            type: DeviceType,
+            args: {
+                id: { type: new GraphQLNonNull(GraphQLID) }
+            },
+            resolve: async(parent, args, req) => {
+                if (!req.adminIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                let device = await Device.findById(args.id)
+                return await Device.remove(device)
+            }
+        },
     }
 });
