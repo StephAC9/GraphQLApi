@@ -270,7 +270,7 @@ const Mutation = new GraphQLObjectType({
                     throw new Error('Password is incorrect!');
                 }
                 const token = jwt.sign({ id: user.id, email: user.email },
-                    process.env.USER_ACCESS_TOKEN_SECRETKEY, {
+                    process.env.ACCESS_TOKEN_SECRETKEY, {
                         expiresIn: '1h'
                     }
                 );
