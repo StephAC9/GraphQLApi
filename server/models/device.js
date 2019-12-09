@@ -4,6 +4,7 @@ const Schema = mongoose.Schema;
 const deviceSchema = new Schema({
     descriptor: String,
     status: String,
+    inFavoriteList: String,
     imageURL: String,
     roomId: String,
     houseId: String

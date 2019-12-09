@@ -12,6 +12,20 @@ const app = express()
 app.use(userIsAuth)
 app.use(adminIsAuth)
 
+// CORS middleware
+app.use((req, res, next) => {
+    res.header("Access-Control-Allow-Origin", '*'); // restrict it to the required domain
+    // Set custom headers for CORS
+    res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,PATCH,OPTIONS');
+    res.header("Access-Control-Allow-Headers", "Content-type,Accept,X-Custom-Header,Authorization");
+
+    if (req.method === "OPTIONS") {
+        return res.status(200).end();
+    }
+
+    return next();
+});
+
 const ConnectionString = process.env.DB_CONNECTION_STRING
 const port = process.env.PORT
 
