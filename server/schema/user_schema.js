@@ -29,14 +29,16 @@ const OwnerType = new GraphQLObjectType({
     fields: () => ({
         id: { type: GraphQLID },
         name: { type: GraphQLString },
-        age: { type: GraphQLInt },
         email: { type: GraphQLString },
         password: { type: GraphQLString },
-        phoneNumber: { type: GraphQLString },
         imageURL: { type: GraphQLString },
-        house: {
-            type: HouseType,
-            resolve: async(parent, args) => await House.findOne({ ownerId: parent.id })
+        /*    house: {
+               type: HouseType,
+               resolve: async(parent, args) => await House.findOne({ ownerId: parent.id })
+           }, */
+        houses: {
+            type: new GraphQLList(HouseType),
+            resolve: async(parent, args) => await House.find({ ownerId: parent.id })
         }
     })
 });
@@ -53,6 +55,7 @@ const HouseType = new GraphQLObjectType({
     fields: () => ({
         id: { type: GraphQLID },
         address: { type: GraphQLString },
+        descriptor: { type: GraphQLString },
         owner: {
             type: OwnerType,
             resolve: async(parent, args) => {
@@ -143,9 +146,9 @@ const RootQuery = new GraphQLObjectType({
         owner: {
             type: OwnerType,
             resolve: async(parent, args, req) => {
-                /* if (!req.userIsAuth) {
+                if (!req.userIsAuth) {
                     throw new Error('Unauthenticated!');
-                } */
+                }
                 let owner = await Owner.findById(req.ownerId)
                 if (!owner) {
                     throw new Error('No found!')
@@ -162,7 +165,12 @@ const RootQuery = new GraphQLObjectType({
         },
         houses: {
             type: new GraphQLList(HouseType),
-            resolve: async(parent, args) => await House.find({})
+            resolve: async(parent, args, req) => {
+                if (!req.userIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
+                return await House.find({ ownerId: req.ownerId })
+            }
         },
         owners: {
             type: new GraphQLList(OwnerType),
@@ -179,10 +187,12 @@ const RootQuery = new GraphQLObjectType({
         },
         rooms: {
             type: new GraphQLList(RoomType),
-            resolve: async(parent, args) => await Room.find({})
+            args: { houseId: { type: GraphQLID } },
+            resolve: async(parent, args, req) => await Room.find({ houseId: args.houseId })
         },
         device: {
             type: DeviceType,
+            args: { id: { type: GraphQLID } },
             resolve: async(parent, args) => await Device.findById(args.id)
         },
         devices: {
@@ -221,10 +231,8 @@ const Mutation = new GraphQLObjectType({
             type: OwnerType,
             args: {
                 name: { type: new GraphQLNonNull(GraphQLString) },
-                age: { type: new GraphQLNonNull(GraphQLInt) },
                 email: { type: new GraphQLNonNull(GraphQLString) },
                 password: { type: new GraphQLNonNull(GraphQLString) },
-                phoneNumber: { type: GraphQLString },
             },
             resolve: async(parent, args) => {
                 const existingUser = await Owner.findOne({ email: args.email });
@@ -235,10 +243,8 @@ const Mutation = new GraphQLObjectType({
 
                 const user = new Owner({
                     name: args.name,
-                    age: args.age,
                     email: args.email,
                     password: hashedPassword,
-                    phoneNumber: args.phoneNumber
                 });
 
                 const result = await user.save();
@@ -246,10 +252,8 @@ const Mutation = new GraphQLObjectType({
                 return {
                     id: result.id,
                     name: result.name,
-                    age: result.age,
                     email: result.email,
                     password: null,
-                    phoneNumber: result.phoneNumber
                 };
             }
         },
@@ -271,19 +275,20 @@ const Mutation = new GraphQLObjectType({
                 }
                 const token = jwt.sign({ id: user.id, email: user.email },
                     process.env.ACCESS_TOKEN_SECRETKEY, {
-                        expiresIn: '1h'
+                        expiresIn: '24h'
                     }
                 );
                 return {
                     ownerId: user.id,
                     token: token,
-                    tokenExpiration: '1'
+                    tokenExpiration: '24'
                 };
             }
         },
         addHouse: {
             type: HouseType,
             args: {
+                //ownerId: { type: new GraphQLNonNull(GraphQLString) },
                 address: { type: new GraphQLNonNull(GraphQLString) },
             },
             resolve: async(parent, args, req) => {
@@ -296,7 +301,10 @@ const Mutation = new GraphQLObjectType({
                 }
                 let house = new House({
                     address: args.address,
-                    ownerId: req.ownerId
+                    ownerId: req.ownerId,
+                    //ownerId: args.ownerId,
+                    descriptor: 'House'
+
                 });
                 return await house.save();
             }
@@ -308,9 +316,9 @@ const Mutation = new GraphQLObjectType({
                 houseId: { type: new GraphQLNonNull(GraphQLID) },
             },
             resolve: async(parent, args, req) => {
-                /*  if (!req.userIsAuth) {
-                     throw new Error('Unauthenticated!');
-                 } */
+                if (!req.userIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
                 let room = new Room({
                     descriptor: args.descriptor,
                     houseId: args.houseId,
@@ -325,9 +333,9 @@ const Mutation = new GraphQLObjectType({
                 roomId: { type: new GraphQLNonNull(GraphQLID) }
             },
             resolve: async(parent, args, req) => {
-                /*  if (!req.userIsAuth) {
-                     throw new Error('Unauthenticated!');
-                 } */
+                if (!req.userIsAuth) {
+                    throw new Error('Unauthenticated!');
+                }
                 let room = await Room.findById(args.roomId)
                 let device = new Device({
                     descriptor: args.descriptor,
@@ -411,7 +419,7 @@ const Mutation = new GraphQLObjectType({
                 if (!req.userIsAuth) {
                     throw new Error('Unauthenticated!');
                 }
-                await Device.deleteMany({ houseId: args.houseId }, err => {}) //Remove all corresponding devices
+                await Device.deleteMany({ roomId: args.id }, err => {}) //Remove all corresponding devices
                 let room = await Room.findById(args.id)
                 return await Room.remove(room)
             }

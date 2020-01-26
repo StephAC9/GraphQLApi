@@ -27,7 +27,7 @@ app.use((req, res, next) => {
 });
 
 const ConnectionString = process.env.DB_CONNECTION_STRING
-const port = process.env.PORT
+const port = process.env.PORT || 6000
 
 mongoose.connect(ConnectionString, { useNewUrlParser: true })
     .then(() => {
